@@ -1,0 +1,213 @@
+---
+output:
+  html_document:
+    theme: cosmo
+    toc: yes
+    toc_float: yes
+    highlight: tango
+  pdf_document:
+    toc: yes
+---
+
+```{r, echo=FALSE, results='asis'}
+cat("
+<h1 style='color: #967bb6; text-align: center; font-size: 24px;'>Polynomial Regression & Response Surface Analysis Tutorial</h1>
+<h2 style='color: #967bb6; text-align: center; font-size: 20px;'>&#x1F497; Zhang Tianyi & TCaT Lab &#x1F497;</h2>
+<h3 style='color: #967bb6; text-align: center; font-size: 16px;'>2024-02-28</h3>
+")
+```
+
+```{r include = FALSE}
+library(RSA)
+library(ggplot2)
+library(lattice)
+```
+# Introduction
+
+In this tutorial, we will explore how extroversion differences or similarities influence a couple's perceived happiness in their relationship. The dataset used is randomly generated.
+
+## Approach
+
+We will address this question using polynomial regression and response surface analysis through the following steps:
+
+0. **Genreate the dataset** this dataset is fully randomly generated for this purpose, note that it is **fake** data and results from this tutorial does not have any real-life relevance. 
+1. **Screen the dataset** to determine if the difference is significant enough for running polynomial regression. According to Shanock et al. (2010), a Z-score difference between two variables greater than 0.5 is considered sufficient. For studies specifically aiming to investigate the discrepancy effect, a discrepancy of more than half is required.
+
+2. **Calculate all the second-order terms** - including the interaction term (xy), the square of the first variable (x^2), and the square of the second variable (y^2).
+
+3. **Run the polynomial regression model** to understand the relationship between the variables and the perceived happiness in relationships.
+
+4. **Interpret the results** using response surface analysis to provide insights into how extroversion differences or similarities affect relationship satisfaction.
+
+## Dataset generation 
+```{r Randomly generate the dataframe}
+set.seed(0918) 
+
+extro_o <- runif(1000, min = 1, max = 7)
+extro_y <- runif(1000, min = 1, max = 7)
+extro_diff <- abs(extro_o - extro_y)
+happy <- numeric(length = 1000) 
+
+for (i in 1:1000) {
+  if (runif(1) < 0.7) { 
+    if (extro_o[i] < extro_y[i]) {
+      happy[i] <- 5 - runif(1, min = 0, max = extro_diff[i]/max(extro_diff))
+    } else {
+      happy[i] <- runif(1, min = 1, max = 5)
+    }
+  } else {
+    happy[i] <- runif(1, min = 1, max = 5)
+  }
+}
+
+happy <- pmax(pmin(happy, 5), 1)
+df <- data.frame(extro_o, extro_y, happy)
+
+head(df)
+```
+Now we have a dataset with three variables: 'extro_o' representing the extroversion of the older person in the relationship, ranging from 1 to 7; 'extro_y' representing the extroversion of the younger person in the relationship, ranging from 1 to 7; and 'happy' representing the perceived happiness in the relationship, ranging from 1 to 5.
+
+## Discrepancy screening (Fleenor et al., 1996; Shanock et al., 2010)
+In this chunk, we want to determine if all couples are sufficiently different for the examination of the difference in extroversion to be meaningful. In other words, if all of them are highly similar to each other, there's no point in running this analysis because we want to ascertain whether being different makes them happier.
+```{r}
+mean_extro_o <- mean(extro_o)
+sd_extro_o <- sd(extro_o)
+
+mean_extro_y <- mean(extro_y)
+sd_extro_y <- sd(extro_y)
+
+Z_extro_o <- (extro_o - mean_extro_o) / sd_extro_o
+Z_extro_y <- (extro_y - mean_extro_y) / sd_extro_y
+
+discrepant_values <- abs(Z_extro_o - Z_extro_y) > 0.5
+in_agreement <- mean(!discrepant_values) * 100
+discrepant_percent <- mean(discrepant_values) * 100
+
+cat("Percentage of 'in agreement' values:", round(in_agreement, 2), "%\n")
+cat("Percentage of 'discrepant' values:", round(discrepant_percent, 2), "%\n")
+```
+This is great, we have a roughly 1:3 ratio of agreement and discrepant. We have enough samples of both to proceed. 
+
+## Polynomial regression - variable centering 
+To avoid multicollinearity issues, it's crucial to center our variables first. There are several methods for centering variables, each suitable for different scenarios:
+
+1. **Scale Midpoint Centering (Edwards, 1994)** - This method involves using the scale midpoint. For example, if our scale of extroversion ranges from 1 to 7, the midpoint is 4. Therefore, centered extroversion is calculated as:
+   
+   Centered Extroversion = Extroversion - 4.
+
+2. **Multilevel Pooled-Within Centering (Zhang, Wang, & Shi, 2012)** - This approach is commonly used if your data has a multilevel nature. For instance, in my thesis data where supervisees are nested within their supervisors, centering is achieved using the supervisor group mean.
+
+3. **Grand-Mean Centering** - This method is straightforward, centering the variable around your grand mean. Although I have not encountered literature specifically mentioning this method in relation to my research, it might be considered for a better representation of actual data distribution or for more complex models, over the scale midpoint centering.
+
+For this tutorial, I will use the scale midpoint centering method. After centering around the midpoint, I will create second-order terms (xy, x-squared and y-squared) accordingly. 
+```{r}
+df$ce_old <- df$extro_o - 4
+df$ce_young <-df$extro_y - 4
+
+# creating second order
+df$xsquared = df$ce_old ^ 2
+df$xy = df$ce_old * df$ce_young
+df$ysquared = df$ce_young ^ 2
+```
+
+## Polynomial regression - run and visualize the model
+```{r}
+model.poly <- lm(happy ~ ce_old + ce_young + 
+                  xy + ysquared + xsquared, data = df)
+
+summary(model.poly)
+
+plot.poly <- plotRSA(b0 = 3.5959863, x = -0.2091105, y = 0.1699166, 
+        x2 = -0.0009442, y2 = 0.0190668, xy = 0.0183350, 
+        xlab = "Older Partner Extroversion", 
+        ylab = "Younger Partner Extroversion", 
+        zlab = "Perceived Relationship Happiness",
+        surface = "predict")
+
+plot.poly
+```
+## Polynomial regression - significance testing  
+```{r}
+vcov(model.poly)
+```
+We need to gather all the information from these results, and calculate the significance of our model. Move to the Excel sheet from Shanock and colleagues (2010). 
+
+
+## Polynomial regression - result interpretation
+Now we have some significance testing done, we roughly know which line and curve is significant. Let's visualize these in 2-D for better interpretation. 
+```{r}
+calculate_happy <- function(ce_old, ce_young) {
+  xsquared <- ce_old^2
+  xy <- ce_old * ce_young
+  ysquared <- ce_young^2
+  happy <- 3.5959863 - 0.2091105*ce_old + 0.1699166*ce_young + 
+           0.0183350*xy + 0.0190668*ysquared - 0.0009442*xsquared
+  return(happy)
+}
+
+x_values <- seq(from = min(df$ce_old, df$ce_young), to = max(df$ce_old, df$ce_young), length.out = 100)
+happy_x_eq_y <- calculate_happy(x_values, x_values)
+happy_x_neg_y <- calculate_happy(x_values, -x_values)
+
+data_x_eq_y <- data.frame(ce_value = x_values, Happy = happy_x_eq_y)
+data_x_neg_y <- data.frame(ce_value = x_values, Happy = happy_x_neg_y)
+
+p1 <- ggplot(data_x_eq_y, aes(x = ce_value, y = Happy)) +
+  geom_line(color = "lavender", size = 1.5) +
+  ggtitle("Happy vs. Extroversion Congruence") +
+  theme_minimal() +
+  labs(x = "Extroversion (X = Y)", y = "Happy") +
+  ylim(1, 5) # Setting y-axis limits
+
+p2 <- ggplot(data_x_neg_y, aes(x = ce_value, y = Happy)) +
+  geom_line(color = "hotpink", size = 1.5) +
+  ggtitle("Happy vs. Extroversion Incongruence") +
+  theme_minimal() +
+  labs(x = "Extroversion (X = -Y)", y = "Happy") +
+  ylim(1, 5) # Setting y-axis limits
+
+print(p1)
+print(p2)
+```
+
+Combining these two graphs with the previous results from the Excel sheet, we can draw a few conclusions:
+
+1. **No Congruence Effect** - This means that when both individuals in the relationship are similar, there's no relationship between their congruence and perceived happiness. This conclusion is based on the insignificance of a1 and a2.
+
+2. **Significant Incongruence Effect** - There is a significant incongruence effect (significant a3). Since a3 is negative and significant, we can conclude that when the two individuals are opposites, the discrepancy predicts happiness. Specifically, when the discrepancy increases such that the older person is more extroverted than the younger person, happiness decreases. This relationship also works in the reverse scenario.
+
+3. **Linear Relationship** - The relationship between discrepancy and happiness is linear, as indicated by the insignificance of a4.
+
+
+
+```{r, results='asis', echo=FALSE}
+cat("&#x1F497; <span style='color: hotpink;'>Thank you and I hope this is helpful :)</span> &#x1F497;")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
